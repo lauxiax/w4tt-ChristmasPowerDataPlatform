@@ -340,98 +340,130 @@ class TaskScheduler:
             List of assigned task dictionaries
         """
         assigned = []
-        used_slots = set()
-        
-        # Generate available time slots
-        available_slots = self.slot_generator.generate_available_slots(busy_slots)
         
         # Sort tasks by priority and creation date
         sorted_tasks = self._sort_tasks_by_priority(tasks)
         
-        # First pass: strict assignment with all constraints
+        # Parse busy periods once
+        busy_periods = self.slot_generator._parse_busy_periods(busy_slots)
+        
+        # Assign tasks one by one, generating slots as needed
         for task in sorted_tasks:
-            if self._assign_task_strict(task, available_slots, used_slots, assigned):
-                continue
-            
-            # Second pass: relaxed constraints (no daily limit)
-            self._assign_task_relaxed(task, available_slots, used_slots, assigned)
+            self._assign_single_task(task, busy_periods, assigned)
         
         return assigned
+    
+    def _assign_single_task(self, task: Dict, busy_periods: List[Tuple[datetime, datetime]], assigned: List[Dict]) -> bool:
+        """Assign a single task to the next available slot."""
+        meeting_duration = self.duration_calculator.calculate_meeting_duration(task)
+        madrid_now = datetime.now(Config.MADRID_TIMEZONE)
+        
+        # Start from today and look for available slots day by day
+        for day_offset in range(Config.FUTURE_DAYS_LIMIT):
+            current_date = madrid_now.date() + timedelta(days=day_offset)
+            
+            # Skip weekends
+            if current_date.weekday() >= 5:
+                continue
+            
+            # Check if this day already has 2 tasks assigned
+            tasks_today = [a for a in assigned if a['date'] == str(current_date)]
+            if len(tasks_today) >= Config.MAX_TASKS_PER_DAY:
+                continue
+            
+            # Generate slots for this specific day
+            day_slots = self._generate_day_slots_for_assignment(current_date, madrid_now, busy_periods, assigned)
+              # Try to assign task to any available slot in this day
+            for slot in day_slots:
+                # Check if slot has enough duration - if not, adjust to fit
+                slot_duration = (slot['end_time'] - slot['start_time']).total_seconds() / 60
+                actual_duration = min(meeting_duration, slot_duration)
+                
+                # Ensure minimum meeting duration
+                if actual_duration < Config.MIN_MEETING_DURATION:
+                    continue
+                
+                # Check if slot would be consecutive with existing tasks
+                if self.consecutive_checker.is_slot_consecutive(slot['start_time'], assigned):
+                    continue
+                
+                # Create assignment with adjusted duration if needed
+                adjusted = actual_duration < meeting_duration
+                self._create_assignment(task, slot, actual_duration, assigned, set(), adjusted)
+                return True
+        
+        return False
+    
+    def _generate_day_slots_for_assignment(self, date: datetime.date, madrid_now: datetime, busy_periods: List[Tuple[datetime, datetime]], assigned: List[Dict]) -> List[Dict]:
+        """Generate available slots for a specific day, avoiding busy periods and assigned tasks."""
+        slots = []
+        
+        # Define business hours for the day
+        madrid_tz = Config.MADRID_TIMEZONE
+        day_start = madrid_tz.localize(
+            datetime.combine(date, datetime.min.time().replace(hour=Config.BUSINESS_HOURS_START))
+        )
+        day_end = madrid_tz.localize(
+            datetime.combine(date, datetime.min.time().replace(hour=Config.BUSINESS_HOURS_END))
+        )
+        
+        # Adjust start time if it's today
+        if date == madrid_now.date() and day_start < madrid_now:
+            current_hour = madrid_now.hour
+            current_minute = madrid_now.minute
+            
+            # Round to next half hour
+            if current_minute > 0:
+                current_hour += 1
+            
+            adjusted_hour = max(Config.BUSINESS_HOURS_START, current_hour)
+            if adjusted_hour >= Config.BUSINESS_HOURS_END:
+                return slots  # Too late today
+                
+            day_start = madrid_tz.localize(
+                datetime.combine(date, datetime.min.time().replace(hour=adjusted_hour))
+            )
+        
+        # Get assigned tasks for this day
+        assigned_periods = []
+        for task in assigned:
+            if task['date'] == str(date):
+                task_start = datetime.fromisoformat(task['madridTime']['start'].replace(' +', '+'))
+                task_end = datetime.fromisoformat(task['madridTime']['end'].replace(' +', '+'))
+                assigned_periods.append((task_start, task_end))
+        
+        # Generate 30-minute slots
+        slot_start = day_start
+        while slot_start < day_end:
+            slot_end = slot_start + timedelta(minutes=Config.SLOT_DURATION_MINUTES)
+            
+            # Check if slot overlaps with busy periods
+            is_available = True
+            for busy_start, busy_end in busy_periods:
+                if (slot_start < busy_end) and (slot_end > busy_start):
+                    is_available = False
+                    break
+            
+            # Check if slot overlaps with already assigned tasks
+            if is_available:
+                for assigned_start, assigned_end in assigned_periods:
+                    if (slot_start < assigned_end) and (slot_end > assigned_start):
+                        is_available = False
+                        break
+            
+            if is_available:
+                slots.append({
+                    'start_time': slot_start,
+                    'end_time': slot_end
+                })
+            
+            slot_start = slot_end
+        
+        return slots
     
     def _sort_tasks_by_priority(self, tasks: List[Dict]) -> List[Dict]:
         """Sort tasks by priority and creation date."""
         return sorted(tasks, key=lambda t: (t.get('priority', 5), t.get('createdDateTime', '2099-12-31')))
-    
-    def _assign_task_strict(self, task: Dict, available_slots: List[Dict], used_slots: set, assigned: List[Dict]) -> bool:
-        """Attempt to assign task with strict constraints."""
-        meeting_duration = self.duration_calculator.calculate_meeting_duration(task)
-        
-        for slot in available_slots:
-            if not self._is_slot_usable_strict(slot, used_slots, assigned, meeting_duration):
-                continue
-            
-            self._create_assignment(task, slot, meeting_duration, assigned, used_slots)
-            return True
-        
-        return False
-    
-    def _assign_task_relaxed(self, task: Dict, available_slots: List[Dict], used_slots: set, assigned: List[Dict]) -> bool:
-        """Attempt to assign task with relaxed constraints."""
-        meeting_duration = self.duration_calculator.calculate_meeting_duration(task)
-        
-        for slot in available_slots:
-            if not self._is_slot_usable_relaxed(slot, used_slots, assigned):
-                continue
-            
-            # Adjust duration if necessary
-            slot_duration = (slot['end_time'] - slot['start_time']).total_seconds() / 60
-            if slot_duration < meeting_duration:
-                meeting_duration = max(slot_duration, Config.MIN_MEETING_DURATION)
-            
-            self._create_assignment(task, slot, meeting_duration, assigned, used_slots, adjusted=True)
-            return True
-        
-        return False
-    
-    def _is_slot_usable_strict(self, slot: Dict, used_slots: set, assigned: List[Dict], meeting_duration: int) -> bool:
-        """Check if slot is usable with strict constraints."""
-        # Check if already used
-        if slot['start_time'] in used_slots:
-            return False
-        
-        # Check duration
-        slot_duration = (slot['end_time'] - slot['start_time']).total_seconds() / 60
-        if slot_duration < meeting_duration:
-            return False
-        
-        # Check daily limit
-        day_key = slot['start_time'].date()
-        tasks_today = [a for a in assigned if a['date'] == str(day_key)]
-        if len(tasks_today) >= Config.MAX_TASKS_PER_DAY:
-            return False
-        
-        # Check consecutive slots
-        if self.consecutive_checker.is_slot_consecutive(slot['start_time'], assigned):
-            return False
-        
-        return True
-    
-    def _is_slot_usable_relaxed(self, slot: Dict, used_slots: set, assigned: List[Dict]) -> bool:
-        """Check if slot is usable with relaxed constraints."""
-        # Check if already used
-        if slot['start_time'] in used_slots:
-            return False
-        
-        # Check minimum duration
-        slot_duration = (slot['end_time'] - slot['start_time']).total_seconds() / 60
-        if slot_duration < Config.MIN_MEETING_DURATION:
-            return False
-        
-        # Check consecutive slots (keep this constraint)
-        if self.consecutive_checker.is_slot_consecutive(slot['start_time'], assigned):
-            return False
-        
-        return True
     
     def _create_assignment(self, task: Dict, slot: Dict, meeting_duration: int, assigned: List[Dict], used_slots: set, adjusted: bool = False) -> None:
         """Create a task assignment and add it to the assigned list."""
