@@ -11,74 +11,58 @@ def is_slot_available(slot):
     """
     Determina si un slot está disponible para programar una reunión.
     
-    Para datos provenientes de Power Automate, asumimos que todos los slots
-    devueltos por la búsqueda de tiempo libre son potencialmente disponibles,
-    independientemente del campo showAs.
+    Utiliza una lógica conservadora: solo considera disponibles los slots
+    que están explícitamente marcados como libres o tienen características
+    claras de tiempo disponible.
     """
-    # El campo 'showAs' es el indicador más confiable en circunstancias normales
-    show_as = slot.get('showAs', '')
+    # El campo 'showAs' es el indicador más confiable
+    show_as = slot.get('showAs', '').lower()
     
-    # Si está marcado como libre, definitivamente está disponible
-    if show_as == 'free':
+    # Solo estos estados se consideran definitivamente disponibles
+    if show_as in ['free', 'tentative']:
         return True
     
-    # Si está marcado como tentativo, puede estar disponible
-    if show_as == 'tentative':
-        return True
-    
-    # Si está marcado como fuera de oficina, NO está disponible
-    if show_as == 'oof':  # Out of Office
+    # Estos estados son definitivamente NO disponibles
+    if show_as in ['busy', 'oof', 'workingelsewhere']:
         return False
     
-    # Si está marcado como trabajando en otro lugar, consideramos que no está disponible
-    if show_as == 'workingElsewhere':
-        return False
+    # Si no hay showAs definido, verificamos otros indicadores
+    # pero con lógica más conservadora
     
-    # Para slots marcados como "busy", necesitamos analizar más contexto
-    # ya que Power Automate puede devolver slots "busy" que son en realidad disponibles
-    if show_as == 'busy':
-        # Si el slot tiene características de un bloque de tiempo generado automáticamente,
-        # probablemente sea un slot disponible marcado por Power Automate
-        
-        # Verificar si es un evento real con contenido o un placeholder
-        subject = slot.get('subject', '').strip()
-        
-        # Si no tiene organizador definido o es el usuario actual, podría ser disponible
-        organizer = slot.get('organizer', '')
-        
-        # Si no tiene ubicación específica, podría ser un slot libre
-        location = slot.get('location', '').strip()
-        
-        # Si no tiene attendees o solo tiene attendees vacíos
-        required_attendees = slot.get('requiredAttendees', '').strip()
-        optional_attendees = slot.get('optionalAttendees', '').strip()
-        
-        # Heurística: si es un slot simple sin muchos detalles, probablemente está disponible
-        has_minimal_details = (
-            not location and 
-            not required_attendees and 
-            not optional_attendees and
-            len(subject) < 50  # Subject corto o genérico
-        )
-        
-        if has_minimal_details:
-            return True
-    
-    # Si no tiene el campo showAs definido, verificamos otros indicadores
-    # Esto puede suceder con slots generados por Power Automate
-    
-    # Si no tiene subject o tiene un subject muy genérico/vacío, podría ser un slot libre
+    # Verificar si hay evidencia de que es un evento real
     subject = slot.get('subject', '').strip()
-    if not subject:
-        return True
+    organizer = slot.get('organizer', '').strip()
+    location = slot.get('location', '').strip()
+    required_attendees = slot.get('requiredAttendees', '').strip()
+    optional_attendees = slot.get('optionalAttendees', '').strip()
     
-    # Si no hay asistentes requeridos, podría estar disponible
-    required_attendees = slot.get('requiredAttendees', '')
-    if not required_attendees or required_attendees.strip() == '':
-        return True
+    # Si tiene organizador, ubicación o asistentes, probablemente es un evento real
+    has_event_details = (
+        organizer or 
+        location or 
+        required_attendees or 
+        optional_attendees
+    )
     
-    # Por defecto, si no podemos determinar el estado claramente, 
-    # asumimos que está disponible ya que proviene de una búsqueda de tiempo libre
+    if has_event_details:
+        return False  # Hay evidencia de que es un evento real
+    
+    # Si el subject sugiere que es un evento real (no vacío y con contenido)
+    if subject and len(subject) > 5:
+        # Excluir subjects que claramente indican disponibilidad
+        available_indicators = [
+            'free', 'available', 'libre', 'disponible', 
+            'open', 'abierto', 'slot'
+        ]
+        
+        subject_lower = subject.lower()
+        is_availability_indicator = any(indicator in subject_lower for indicator in available_indicators)
+        
+        if not is_availability_indicator:
+            return False  # Subject con contenido real, probablemente ocupado
+    
+    # Solo si NO hay evidencia de evento real, consideramos disponible
+    # Esto es más conservador que la versión anterior
     return True
 
 @app.route('/', methods=['GET'])
