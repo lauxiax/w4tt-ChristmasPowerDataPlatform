@@ -51,17 +51,8 @@ def assign_tasks():
     # Procesar las tareas y los slots disponibles
     assigned_slots = assign_tasks_to_slots(tasks, available_slots)
 
-    # Identificar tareas no asignadas
-    assigned_task_ids = {assignment['taskId'] for assignment in assigned_slots}
-    unassigned_tasks = [t for t in tasks if t.get('id', '') not in assigned_task_ids]
-
-    # Agregar información sobre tareas no asignadas
-    response = {
-        'assignments': assigned_slots,
-        'unassignedTasks': [{'taskId': t.get('id', ''), 'taskName': t.get('title', 'Sin título')} for t in unassigned_tasks]
-    }
-
-    return jsonify(response)
+    # Devolver directamente la lista de asignaciones (formato original)
+    return jsonify(assigned_slots)
 
 def calculate_meeting_duration(task):
     """
@@ -148,11 +139,11 @@ def assign_tasks_to_slots(tasks, slots):
             meeting_end = slot_start + timedelta(minutes=meeting_duration_minutes)
             if meeting_end > slot_end:
                 meeting_end = slot_end
-            
-            # Formato para devolver
+              # Formato para devolver
             meeting_end_str = meeting_end.isoformat()
             if '.' in slot['end']:  # Mantener formato consistente con el recibido
-                meeting_end_str += '.0000000'            # Asignar tarea al slot
+                meeting_end_str += '.0000000'            
+            # Asignar tarea al slot
             assigned.append({
                 'taskName': task.get('title', 'Sin título'),
                 'taskId': task.get('id', ''),
