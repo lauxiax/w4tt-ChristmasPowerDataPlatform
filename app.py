@@ -11,38 +11,75 @@ def is_slot_available(slot):
     """
     Determina si un slot está disponible para programar una reunión.
     
-    En Power Automate, los slots disponibles suelen tener un formato específico,
-    mientras que los eventos existentes tienen otro.
+    Para datos provenientes de Power Automate, asumimos que todos los slots
+    devueltos por la búsqueda de tiempo libre son potencialmente disponibles,
+    independientemente del campo showAs.
     """
-    # Verificar primero si el slot está marcado explícitamente como "busy"
-    # Si está ocupado, definitivamente NO está disponible
-    if slot.get('showAs', '') == 'busy':
-        # Excepción: algunos slots marcados como "busy" son en realidad huecos disponibles
-        # que han sido marcados por la función de búsqueda de tiempos libres de Outlook
-        subject = slot.get('subject', '')
-        is_placeholder = subject and len(subject) < 20 and any(x in subject for x in ['x', 'z', 'c'])
+    # El campo 'showAs' es el indicador más confiable en circunstancias normales
+    show_as = slot.get('showAs', '')
+    
+    # Si está marcado como libre, definitivamente está disponible
+    if show_as == 'free':
+        return True
+    
+    # Si está marcado como tentativo, puede estar disponible
+    if show_as == 'tentative':
+        return True
+    
+    # Si está marcado como fuera de oficina, NO está disponible
+    if show_as == 'oof':  # Out of Office
+        return False
+    
+    # Si está marcado como trabajando en otro lugar, consideramos que no está disponible
+    if show_as == 'workingElsewhere':
+        return False
+    
+    # Para slots marcados como "busy", necesitamos analizar más contexto
+    # ya que Power Automate puede devolver slots "busy" que son en realidad disponibles
+    if show_as == 'busy':
+        # Si el slot tiene características de un bloque de tiempo generado automáticamente,
+        # probablemente sea un slot disponible marcado por Power Automate
         
-        if is_placeholder:
-            return True  # Es un placeholder para tiempo disponible, a pesar de estar marcado como "busy"
-        return False  # Realmente está ocupado
-    
-    # Si el slot está marcado como libre o tentativo, está disponible
-    if slot.get('showAs', '') in ['free', 'tentative']:
-        return True
-    
-    # Si tiene un "subject" que parece autogenerado (corto o con patrones genéricos)
-    # Esto indica que probablemente es un slot disponible identificado por Outlook
-    subject = slot.get('subject', '')
-    if subject and len(subject) < 20 and any(x in subject for x in ['x', 'z', 'c']):
-        return True
-    
-    # Si no tiene asistentes obligatorios, probablemente sea un slot disponible
-    if 'requiredAttendees' in slot and not slot['requiredAttendees']:
-        return True
+        # Verificar si es un evento real con contenido o un placeholder
+        subject = slot.get('subject', '').strip()
         
-    # Por defecto, somos conservadores y asumimos que no está disponible
-    # a menos que tengamos evidencia de que sí lo está
-    return False
+        # Si no tiene organizador definido o es el usuario actual, podría ser disponible
+        organizer = slot.get('organizer', '')
+        
+        # Si no tiene ubicación específica, podría ser un slot libre
+        location = slot.get('location', '').strip()
+        
+        # Si no tiene attendees o solo tiene attendees vacíos
+        required_attendees = slot.get('requiredAttendees', '').strip()
+        optional_attendees = slot.get('optionalAttendees', '').strip()
+        
+        # Heurística: si es un slot simple sin muchos detalles, probablemente está disponible
+        has_minimal_details = (
+            not location and 
+            not required_attendees and 
+            not optional_attendees and
+            len(subject) < 50  # Subject corto o genérico
+        )
+        
+        if has_minimal_details:
+            return True
+    
+    # Si no tiene el campo showAs definido, verificamos otros indicadores
+    # Esto puede suceder con slots generados por Power Automate
+    
+    # Si no tiene subject o tiene un subject muy genérico/vacío, podría ser un slot libre
+    subject = slot.get('subject', '').strip()
+    if not subject:
+        return True
+    
+    # Si no hay asistentes requeridos, podría estar disponible
+    required_attendees = slot.get('requiredAttendees', '')
+    if not required_attendees or required_attendees.strip() == '':
+        return True
+    
+    # Por defecto, si no podemos determinar el estado claramente, 
+    # asumimos que está disponible ya que proviene de una búsqueda de tiempo libre
+    return True
 
 @app.route('/', methods=['GET'])
 def home():
