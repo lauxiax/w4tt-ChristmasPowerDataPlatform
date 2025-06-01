@@ -7,50 +7,6 @@ app = Flask(__name__)
 # Constante para la zona horaria de Madrid
 MADRID_TIMEZONE = pytz.timezone('Europe/Madrid')
 
-def is_slot_available(slot):
-    """
-    Determina si un slot está disponible para programar una reunión.
-    
-    Regla simple: BUSY = NO disponible, independientemente de otros campos.
-    Solo FREE y TENTATIVE se consideran disponibles.
-    """
-    # El campo 'showAs' es el único indicador que importa
-    show_as = slot.get('showAs', '').lower()
-    
-    # Solo estos estados están disponibles
-    if show_as in ['free', 'tentative']:
-        return True
-    
-    # BUSY siempre significa NO disponible
-    if show_as == 'busy':
-        return False
-    
-    # Estados definitivamente NO disponibles
-    if show_as in ['oof', 'workingelsewhere']:
-        return False
-    
-    # Si no hay showAs definido, verificamos si hay evidencia de evento real
-    subject = slot.get('subject', '').strip()
-    organizer = slot.get('organizer', '').strip()
-    location = slot.get('location', '').strip()
-    required_attendees = slot.get('requiredAttendees', '').strip()
-    optional_attendees = slot.get('optionalAttendees', '').strip()
-    
-    # Si tiene detalles de evento real, NO está disponible
-    has_event_details = (
-        organizer or 
-        location or 
-        required_attendees or 
-        optional_attendees or
-        (subject and len(subject) > 3)  # Subject con contenido real
-    )
-    
-    if has_event_details:
-        return False
-    
-    # Si no hay showAs y no hay evidencia de evento real, está disponible
-    return True
-
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({"status": "API funcionando correctamente", "message": "Usa el endpoint /assign-tasks para asignar tareas"})
@@ -64,14 +20,12 @@ def assign_tasks():
         return jsonify({"error": "Se requieren las listas 'tasks' y 'slots'"}), 400
 
     tasks = data['tasks']
-    slots = data['slots']
-
-    # Filtrar solo los slots disponibles (distinguiendo entre slots disponibles y eventos existentes)
-    available_slots = [s for s in slots if is_slot_available(s)]
-
-    # Procesar las tareas y los slots disponibles
-    assigned_slots = assign_tasks_to_slots(tasks, available_slots)
-
+    busy_slots = data['slots']  # Los slots que me envías son los ocupados que debo evitar
+    
+    # Los slots que recibo son los BUSY que debo evitar, no los disponibles
+    # Por eso no filtro, sino que los uso como lista de conflictos
+    assigned_slots = assign_tasks_to_slots(tasks, busy_slots)
+    
     # Devolver directamente la lista de asignaciones (formato original)
     return jsonify(assigned_slots)
 
@@ -114,12 +68,19 @@ def calculate_meeting_duration(task):
     # Limitar duración entre 15 y 60 minutos
     return min(max(base_duration, 15), 60)
 
-def assign_tasks_to_slots(tasks, slots):
+def assign_tasks_to_slots(tasks, busy_slots):
+    """
+    Asigna tareas a slots de tiempo disponible, evitando los slots ocupados.
+    
+    Args:
+        tasks: Lista de tareas a asignar
+        busy_slots: Lista de slots ocupados que debo evitar
+    """
     assigned = []
     used_slots = set()
     
-    # Ordenar slots por fecha y hora
-    sorted_slots = sorted(slots, key=lambda s: s.get('start', ''))
+    # Generar slots de tiempo disponibles (lunes a viernes, 9-17, cada 30 min)
+    available_time_slots = generate_available_time_slots(busy_slots)
     
     # Ordenar tareas por prioridad y fecha de creación (prioridad baja en Planner es número alto)
     for task in sorted(tasks, key=lambda t: (t.get('priority', 5), t.get('createdDateTime', '2099-12-31'))):
@@ -128,131 +89,187 @@ def assign_tasks_to_slots(tasks, slots):
         
         task_assigned = False
         
-        for slot in sorted_slots:
-            # Procesar formato de fecha con o sin milisegundos
-            try:
-                slot_start_str = slot['start'].split('.')[0] if '.' in slot['start'] else slot['start']
-                slot_end_str = slot['end'].split('.')[0] if '.' in slot['end'] else slot['end']
-                
-                # Parsear fechas en formato ISO
-                slot_start_utc = datetime.fromisoformat(slot_start_str)
-                slot_end_utc = datetime.fromisoformat(slot_end_str)
-                
-                # Convertir de UTC a zona horaria de Madrid
-                slot_start = convert_utc_to_madrid(slot_start_utc)
-                slot_end = convert_utc_to_madrid(slot_end_utc)
-            except (ValueError, KeyError):
-                continue
-
-            # Restricciones: lunes a viernes, 9 a 5, no más de 2 tareas por día
-            if slot_start.weekday() >= 5 or slot_start.hour < 9 or slot_end.hour > 17:
-                continue
-
-            day_key = slot_start.date()
-            if len([a for a in assigned if a['date'] == str(day_key)]) >= 2:
-                continue
-
+        for slot in available_time_slots:
             # Verificar si el slot ya está en uso
-            if slot_start in used_slots:
+            if slot['start_time'] in used_slots:
                 continue
             
             # Verificar si el slot tiene suficiente duración para la tarea
-            slot_duration_minutes = (slot_end - slot_start).total_seconds() / 60
+            slot_duration_minutes = (slot['end_time'] - slot['start_time']).total_seconds() / 60
             if slot_duration_minutes < meeting_duration_minutes:
                 continue  # Este slot es demasiado corto para esta tarea
             
-            # Calcular tiempo de fin ajustado si es necesario
-            meeting_end = slot_start + timedelta(minutes=meeting_duration_minutes)
-            if meeting_end > slot_end:
-                meeting_end = slot_end
-              # Formato para devolver
-            meeting_end_str = meeting_end.isoformat()
-            if '.' in slot['end']:  # Mantener formato consistente con el recibido
-                meeting_end_str += '.0000000'              # Formato en UTC para mantener compatibilidad con la API
-            # El meeting_end_str está en formato Madrid pero necesitamos convertirlo a UTC para la respuesta
-            meeting_end_utc = meeting_end.astimezone(pytz.UTC)
-            meeting_end_utc_str = meeting_end_utc.replace(tzinfo=None).isoformat()
-            if '.' in slot['end']:
-                meeting_end_utc_str += '.0000000'
+            # Verificar límite de 2 tareas por día
+            day_key = slot['start_time'].date()
+            if len([a for a in assigned if a['date'] == str(day_key)]) >= 2:
+                continue
+            
+            # Calcular tiempo de fin
+            meeting_end = slot['start_time'] + timedelta(minutes=meeting_duration_minutes)
+            if meeting_end > slot['end_time']:
+                meeting_end = slot['end_time']
+            
+            # Convertir a UTC para la respuesta
+            start_utc = slot['start_time'].astimezone(pytz.UTC)
+            end_utc = meeting_end.astimezone(pytz.UTC)
+            
+            # Formatear fechas UTC para respuesta
+            start_utc_str = start_utc.replace(tzinfo=None).isoformat() + '.0000000'
+            end_utc_str = end_utc.replace(tzinfo=None).isoformat() + '.0000000'
                 
             # Asignar tarea al slot
             assigned.append({
                 'taskName': task.get('title', 'Sin título'),
                 'taskId': task.get('id', ''),
-                'reservationTime': slot['start'],  # Mantener el formato original UTC
-                'reservationEnd': meeting_end_utc_str,  # Convertir de vuelta a UTC
+                'reservationTime': start_utc_str,
+                'reservationEnd': end_utc_str,
                 'calculatedDurationMinutes': meeting_duration_minutes,
-                'dayOfWeek': slot_start.strftime('%A'),
-                'date': str(slot_start.date()),
-                'slotId': slot.get('id', ''),
+                'dayOfWeek': slot['start_time'].strftime('%A'),
+                'date': str(slot['start_time'].date()),
+                'slotId': f"generated_{slot['start_time'].isoformat()}",
                 'madridTime': {
-                    'start': slot_start.strftime('%Y-%m-%d %H:%M:%S %z'),
+                    'start': slot['start_time'].strftime('%Y-%m-%d %H:%M:%S %z'),
                     'end': meeting_end.strftime('%Y-%m-%d %H:%M:%S %z')
                 }
             })
-            used_slots.add(slot_start)
+            used_slots.add(slot['start_time'])
             task_assigned = True
             break
-          # Si no se encontró ningún slot adecuado, intentamos ser menos restrictivos
+        
+        # Si no se pudo asignar con restricción de 2 por día, intentar sin esa restricción
         if not task_assigned:
-            # Intentamos nuevamente sin la restricción de máximo 2 por día
-            for slot in sorted_slots:
-                try:
-                    slot_start_str = slot['start'].split('.')[0] if '.' in slot['start'] else slot['start']
-                    slot_end_str = slot['end'].split('.')[0] if '.' in slot['end'] else slot['end']
-                    
-                    # Parsear fechas en formato ISO
-                    slot_start_utc = datetime.fromisoformat(slot_start_str)
-                    slot_end_utc = datetime.fromisoformat(slot_end_str)
-                    
-                    # Convertir de UTC a zona horaria de Madrid
-                    slot_start = convert_utc_to_madrid(slot_start_utc)
-                    slot_end = convert_utc_to_madrid(slot_end_utc)
-                except (ValueError, KeyError):
-                    continue
-
-                # Mantener restricción de días laborables y horario laboral
-                if slot_start.weekday() >= 5 or slot_start.hour < 9 or slot_end.hour > 17:
-                    continue
-
-                if slot_start in used_slots:
+            for slot in available_time_slots:
+                if slot['start_time'] in used_slots:
                     continue
                 
                 # Verificar duración mínima (15 minutos al menos)
-                slot_duration_minutes = (slot_end - slot_start).total_seconds() / 60
+                slot_duration_minutes = (slot['end_time'] - slot['start_time']).total_seconds() / 60
                 if slot_duration_minutes < 15:
                     continue
-                  # Ajustamos la duración si es necesario
+                
+                # Ajustar duración si es necesario
                 if slot_duration_minutes < meeting_duration_minutes:
                     meeting_duration_minutes = slot_duration_minutes
                 
-                meeting_end = slot_start + timedelta(minutes=meeting_duration_minutes)
+                meeting_end = slot['start_time'] + timedelta(minutes=meeting_duration_minutes)
                 
-                # Formato en UTC para mantener compatibilidad con la API
-                meeting_end_utc = meeting_end.astimezone(pytz.UTC)
-                meeting_end_utc_str = meeting_end_utc.replace(tzinfo=None).isoformat()
-                if '.' in slot['end']:
-                    meeting_end_utc_str += '.0000000'
+                # Convertir a UTC para la respuesta
+                start_utc = slot['start_time'].astimezone(pytz.UTC)
+                end_utc = meeting_end.astimezone(pytz.UTC)
+                
+                # Formatear fechas UTC para respuesta
+                start_utc_str = start_utc.replace(tzinfo=None).isoformat() + '.0000000'
+                end_utc_str = end_utc.replace(tzinfo=None).isoformat() + '.0000000'
                 
                 assigned.append({
                     'taskName': task.get('title', 'Sin título'),
                     'taskId': task.get('id', ''),
-                    'reservationTime': slot['start'],
-                    'reservationEnd': meeting_end_utc_str,
+                    'reservationTime': start_utc_str,
+                    'reservationEnd': end_utc_str,
                     'calculatedDurationMinutes': meeting_duration_minutes,
                     'adjustedDuration': True,  # Indicar que se ajustó la duración
-                    'dayOfWeek': slot_start.strftime('%A'),
-                    'date': str(slot_start.date()),
-                    'slotId': slot.get('id', ''),
+                    'dayOfWeek': slot['start_time'].strftime('%A'),
+                    'date': str(slot['start_time'].date()),
+                    'slotId': f"generated_{slot['start_time'].isoformat()}",
                     'madridTime': {
-                        'start': slot_start.strftime('%Y-%m-%d %H:%M:%S %z'),
+                        'start': slot['start_time'].strftime('%Y-%m-%d %H:%M:%S %z'),
                         'end': meeting_end.strftime('%Y-%m-%d %H:%M:%S %z')
                     }
                 })
-                used_slots.add(slot_start)
+                used_slots.add(slot['start_time'])
                 break
 
     return assigned
+
+def generate_available_time_slots(busy_slots, days_ahead=30):
+    """
+    Genera slots de tiempo disponibles evitando los slots ocupados.
+    
+    Args:
+        busy_slots: Lista de slots ocupados que debo evitar
+        days_ahead: Número de días a generar hacia adelante
+        
+    Returns:
+        Lista de slots disponibles en formato Madrid
+    """
+    available_slots = []
+    
+    # Obtener fecha actual en Madrid
+    madrid_now = datetime.now(MADRID_TIMEZONE)
+    start_date = madrid_now.date()
+    
+    # Convertir busy_slots a períodos ocupados en Madrid
+    busy_periods = []
+    for busy_slot in busy_slots:
+        try:
+            # Procesar formato de fecha con o sin milisegundos
+            start_str = busy_slot['start'].split('.')[0] if '.' in busy_slot['start'] else busy_slot['start']
+            end_str = busy_slot['end'].split('.')[0] if '.' in busy_slot['end'] else busy_slot['end']
+            
+            # Parsear fechas UTC y convertir a Madrid
+            start_utc = datetime.fromisoformat(start_str)
+            end_utc = datetime.fromisoformat(end_str)
+            
+            start_madrid = convert_utc_to_madrid(start_utc)
+            end_madrid = convert_utc_to_madrid(end_utc)
+            
+            busy_periods.append((start_madrid, end_madrid))
+        except (ValueError, KeyError):
+            continue
+    
+    # Generar slots para los próximos días
+    for day_offset in range(days_ahead):
+        current_date = start_date + timedelta(days=day_offset)
+        
+        # Solo días laborables (lunes=0, domingo=6)
+        if current_date.weekday() >= 5:  # Sábado o domingo
+            continue
+        
+        # Generar slots de 30 minutos desde las 9:00 hasta las 17:00
+        current_day_start = MADRID_TIMEZONE.localize(
+            datetime.combine(current_date, datetime.min.time().replace(hour=9))
+        )
+        current_day_end = MADRID_TIMEZONE.localize(
+            datetime.combine(current_date, datetime.min.time().replace(hour=17))
+        )
+        
+        # Solo considerar slots futuros
+        if current_day_start < madrid_now:
+            # Si es hoy, empezar desde la hora actual redondeada
+            if current_date == madrid_now.date():
+                current_hour = madrid_now.hour
+                current_minute = madrid_now.minute
+                # Redondear a la siguiente media hora
+                if current_minute > 0:
+                    current_hour += 1
+                if current_hour >= 17:  # Si ya es muy tarde hoy, saltar al siguiente día
+                    continue
+                current_day_start = MADRID_TIMEZONE.localize(
+                    datetime.combine(current_date, datetime.min.time().replace(hour=max(9, current_hour)))
+                )
+        
+        # Generar slots de 30 minutos
+        slot_start = current_day_start
+        while slot_start < current_day_end:
+            slot_end = slot_start + timedelta(minutes=30)
+            
+            # Verificar que no solapea con ningún período ocupado
+            is_available = True
+            for busy_start, busy_end in busy_periods:
+                # Verificar solapamiento
+                if (slot_start < busy_end) and (slot_end > busy_start):
+                    is_available = False
+                    break
+            
+            if is_available:
+                available_slots.append({
+                    'start_time': slot_start,
+                    'end_time': slot_end
+                })
+            
+            slot_start = slot_end
+    
+    return available_slots
 
 def convert_utc_to_madrid(dt):
     """
