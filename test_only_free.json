@@ -1,0 +1,46 @@
+{
+  "tasks": [
+    {
+      "id": "task1",
+      "title": "First task",
+      "priority": 1,
+      "percentComplete": 0,
+      "createdDateTime": "2024-01-15T10:00:00Z",
+      "hasDescription": false,
+      "checklistItemCount": 1
+    },
+    {
+      "id": "task2",
+      "title": "Second task",
+      "priority": 2,
+      "percentComplete": 0,
+      "createdDateTime": "2024-01-15T11:00:00Z",
+      "hasDescription": false,
+      "checklistItemCount": 1
+    }
+  ],
+  "slots": [
+    {
+      "id": "slot1_free",
+      "start": "2024-01-16T09:30:00.0000000",
+      "end": "2024-01-16T10:30:00.0000000",
+      "showAs": "free",
+      "subject": "",
+      "organizer": "",
+      "location": "",
+      "requiredAttendees": "",
+      "optionalAttendees": ""
+    },
+    {
+      "id": "slot2_free",
+      "start": "2024-01-16T11:00:00.0000000",
+      "end": "2024-01-16T12:00:00.0000000",
+      "showAs": "free",
+      "subject": "",
+      "organizer": "",
+      "location": "",
+      "requiredAttendees": "",
+      "optionalAttendees": ""
+    }
+  ]
+}

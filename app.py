@@ -11,58 +11,44 @@ def is_slot_available(slot):
     """
     Determina si un slot está disponible para programar una reunión.
     
-    Utiliza una lógica conservadora: solo considera disponibles los slots
-    que están explícitamente marcados como libres o tienen características
-    claras de tiempo disponible.
+    Regla simple: BUSY = NO disponible, independientemente de otros campos.
+    Solo FREE y TENTATIVE se consideran disponibles.
     """
-    # El campo 'showAs' es el indicador más confiable
+    # El campo 'showAs' es el único indicador que importa
     show_as = slot.get('showAs', '').lower()
     
-    # Solo estos estados se consideran definitivamente disponibles
+    # Solo estos estados están disponibles
     if show_as in ['free', 'tentative']:
         return True
     
-    # Estos estados son definitivamente NO disponibles
-    if show_as in ['busy', 'oof', 'workingelsewhere']:
+    # BUSY siempre significa NO disponible
+    if show_as == 'busy':
         return False
     
-    # Si no hay showAs definido, verificamos otros indicadores
-    # pero con lógica más conservadora
+    # Estados definitivamente NO disponibles
+    if show_as in ['oof', 'workingelsewhere']:
+        return False
     
-    # Verificar si hay evidencia de que es un evento real
+    # Si no hay showAs definido, verificamos si hay evidencia de evento real
     subject = slot.get('subject', '').strip()
     organizer = slot.get('organizer', '').strip()
     location = slot.get('location', '').strip()
     required_attendees = slot.get('requiredAttendees', '').strip()
     optional_attendees = slot.get('optionalAttendees', '').strip()
     
-    # Si tiene organizador, ubicación o asistentes, probablemente es un evento real
+    # Si tiene detalles de evento real, NO está disponible
     has_event_details = (
         organizer or 
         location or 
         required_attendees or 
-        optional_attendees
+        optional_attendees or
+        (subject and len(subject) > 3)  # Subject con contenido real
     )
     
     if has_event_details:
-        return False  # Hay evidencia de que es un evento real
+        return False
     
-    # Si el subject sugiere que es un evento real (no vacío y con contenido)
-    if subject and len(subject) > 5:
-        # Excluir subjects que claramente indican disponibilidad
-        available_indicators = [
-            'free', 'available', 'libre', 'disponible', 
-            'open', 'abierto', 'slot'
-        ]
-        
-        subject_lower = subject.lower()
-        is_availability_indicator = any(indicator in subject_lower for indicator in available_indicators)
-        
-        if not is_availability_indicator:
-            return False  # Subject con contenido real, probablemente ocupado
-    
-    # Solo si NO hay evidencia de evento real, consideramos disponible
-    # Esto es más conservador que la versión anterior
+    # Si no hay showAs y no hay evidencia de evento real, está disponible
     return True
 
 @app.route('/', methods=['GET'])
