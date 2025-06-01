@@ -3,6 +3,10 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({"status": "API funcionando correctamente", "message": "Usa el endpoint /assign-tasks para asignar tareas"})
+
 @app.route('/assign-tasks', methods=['POST'])
 def assign_tasks():
     data = request.get_json()
@@ -52,4 +56,7 @@ def assign_tasks_to_slots(tasks, slots):
     return assigned
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Obtener el puerto desde la variable de entorno (para Railway) o usar 5000 por defecto
+    import os
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
