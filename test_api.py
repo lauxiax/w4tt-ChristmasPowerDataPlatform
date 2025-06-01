@@ -31,7 +31,8 @@ def test_api(tasks=None, slots=None, url="https://web-production-15ac8.up.railwa
     try:
         print(f"Enviando solicitud a {url}...")
         response = requests.post(url, json=payload)
-        print(f"Estado: {response.status_code}")        if response.status_code == 200:
+        print(f"Estado: {response.status_code}")
+        if response.status_code == 200:
             result = response.json()
             
             print("Asignaciones realizadas:")
