@@ -32,15 +32,36 @@ def test_api(tasks=None, slots=None, url="https://web-production-15ac8.up.railwa
         print(f"Enviando solicitud a {url}...")
         response = requests.post(url, json=payload)
         print(f"Estado: {response.status_code}")
-        
-        if response.status_code == 200:
+          if response.status_code == 200:
             result = response.json()
-            print("Asignaciones realizadas:")
-            for i, assignment in enumerate(result, 1):
-                print(f"\n{i}. Tarea: {assignment['taskName']}")
-                print(f"   ID: {assignment['taskId']}")
-                print(f"   Fecha: {assignment['date']} ({assignment['dayOfWeek']})")
-                print(f"   Horario: {assignment['reservationTime']} - {assignment['reservationEnd']}")
+            
+            if 'assignments' in result:
+                # Nuevo formato
+                assignments = result['assignments']
+                unassigned = result.get('unassignedTasks', [])
+                
+                print("Asignaciones realizadas:")
+                for i, assignment in enumerate(assignments, 1):
+                    print(f"\n{i}. Tarea: {assignment['taskName']}")
+                    print(f"   ID: {assignment['taskId']}")
+                    print(f"   Fecha: {assignment['date']} ({assignment['dayOfWeek']})")
+                    print(f"   Horario: {assignment['reservationTime']} - {assignment['reservationEnd']}")
+                    print(f"   Duración: {assignment.get('calculatedDurationMinutes', 'N/A')} minutos")
+                    if assignment.get('adjustedDuration'):
+                        print(f"   ⚠️ Duración ajustada debido a restricciones de tiempo")
+                
+                if unassigned:
+                    print("\nTareas no asignadas:")
+                    for i, task in enumerate(unassigned, 1):
+                        print(f"{i}. {task['taskName']} (ID: {task['taskId']})")
+            else:
+                # Formato antiguo
+                print("Asignaciones realizadas:")
+                for i, assignment in enumerate(result, 1):
+                    print(f"\n{i}. Tarea: {assignment['taskName']}")
+                    print(f"   ID: {assignment['taskId']}")
+                    print(f"   Fecha: {assignment['date']} ({assignment['dayOfWeek']})")
+                    print(f"   Horario: {assignment['reservationTime']} - {assignment['reservationEnd']}")
             
             return result
         else:

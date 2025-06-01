@@ -3,6 +3,33 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
+def is_slot_available(slot):
+    """
+    Determina si un slot está disponible para programar una reunión.
+    
+    En Power Automate, los slots disponibles suelen tener un formato específico,
+    mientras que los eventos existentes tienen otro.
+    """
+    # Verifica si el slot proviene de una búsqueda de tiempos disponibles
+    # Esto es una heurística basada en los datos que has proporcionado
+    
+    # Si el slot tiene un "subject" que parece autogenerado (corto o con patrones genéricos)
+    subject = slot.get('subject', '')
+    if subject and len(subject) < 20 and any(x in subject for x in ['x', 'z', 'c']):
+        return True
+
+    # Si no tiene asistentes obligatorios, probablemente sea un slot disponible
+    if 'requiredAttendees' in slot and not slot['requiredAttendees']:
+        return True
+        
+    # Si tiene un showAs "free" o "tentative", podría estar disponible
+    if slot.get('showAs', '') in ['free', 'tentative']:
+        return True
+    
+    # Por defecto, asumimos que está disponible
+    # Si prefieres ser más conservador, cambia esto a False
+    return True
+
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({"status": "API funcionando correctamente", "message": "Usa el endpoint /assign-tasks para asignar tareas"})
@@ -18,10 +45,23 @@ def assign_tasks():
     tasks = data['tasks']
     slots = data['slots']
 
-    # Procesar las tareas y los slots
-    assigned_slots = assign_tasks_to_slots(tasks, slots)
+    # Filtrar solo los slots disponibles (distinguiendo entre slots disponibles y eventos existentes)
+    available_slots = [s for s in slots if is_slot_available(s)]
 
-    return jsonify(assigned_slots)
+    # Procesar las tareas y los slots disponibles
+    assigned_slots = assign_tasks_to_slots(tasks, available_slots)
+
+    # Identificar tareas no asignadas
+    assigned_task_ids = {assignment['taskId'] for assignment in assigned_slots}
+    unassigned_tasks = [t for t in tasks if t.get('id', '') not in assigned_task_ids]
+
+    # Agregar información sobre tareas no asignadas
+    response = {
+        'assignments': assigned_slots,
+        'unassignedTasks': [{'taskId': t.get('id', ''), 'taskName': t.get('title', 'Sin título')} for t in unassigned_tasks]
+    }
+
+    return jsonify(response)
 
 def calculate_meeting_duration(task):
     """
@@ -65,13 +105,18 @@ def calculate_meeting_duration(task):
 def assign_tasks_to_slots(tasks, slots):
     assigned = []
     used_slots = set()
-
+    
+    # Ordenar slots por fecha y hora
+    sorted_slots = sorted(slots, key=lambda s: s.get('start', ''))
+    
     # Ordenar tareas por prioridad y fecha de creación (prioridad baja en Planner es número alto)
     for task in sorted(tasks, key=lambda t: (t.get('priority', 5), t.get('createdDateTime', '2099-12-31'))):
         # Calcular la duración necesaria para esta tarea
         meeting_duration_minutes = calculate_meeting_duration(task)
         
-        for slot in slots:
+        task_assigned = False
+        
+        for slot in sorted_slots:
             # Procesar formato de fecha con o sin milisegundos
             try:
                 slot_start_str = slot['start'].split('.')[0] if '.' in slot['start'] else slot['start']
@@ -90,6 +135,7 @@ def assign_tasks_to_slots(tasks, slots):
             if len([a for a in assigned if a['date'] == str(day_key)]) >= 2:
                 continue
 
+            # Verificar si el slot ya está en uso
             if slot_start in used_slots:
                 continue
             
@@ -106,9 +152,7 @@ def assign_tasks_to_slots(tasks, slots):
             # Formato para devolver
             meeting_end_str = meeting_end.isoformat()
             if '.' in slot['end']:  # Mantener formato consistente con el recibido
-                meeting_end_str += '.0000000'
-
-            # Asignar tarea al slot
+                meeting_end_str += '.0000000'            # Asignar tarea al slot
             assigned.append({
                 'taskName': task.get('title', 'Sin título'),
                 'taskId': task.get('id', ''),
@@ -116,10 +160,60 @@ def assign_tasks_to_slots(tasks, slots):
                 'reservationEnd': meeting_end_str,
                 'calculatedDurationMinutes': meeting_duration_minutes,
                 'dayOfWeek': slot_start.strftime('%A'),
-                'date': str(slot_start.date())
+                'date': str(slot_start.date()),
+                'slotId': slot.get('id', '')
             })
             used_slots.add(slot_start)
+            task_assigned = True
             break
+        
+        # Si no se encontró ningún slot adecuado, intentamos ser menos restrictivos
+        if not task_assigned:
+            # Intentamos nuevamente sin la restricción de máximo 2 por día
+            for slot in sorted_slots:
+                try:
+                    slot_start_str = slot['start'].split('.')[0] if '.' in slot['start'] else slot['start']
+                    slot_end_str = slot['end'].split('.')[0] if '.' in slot['end'] else slot['end']
+                    
+                    slot_start = datetime.fromisoformat(slot_start_str)
+                    slot_end = datetime.fromisoformat(slot_end_str)
+                except (ValueError, KeyError):
+                    continue
+
+                # Mantener restricción de días laborables y horario laboral
+                if slot_start.weekday() >= 5 or slot_start.hour < 9 or slot_end.hour > 17:
+                    continue
+
+                if slot_start in used_slots:
+                    continue
+                
+                # Verificar duración mínima (15 minutos al menos)
+                slot_duration_minutes = (slot_end - slot_start).total_seconds() / 60
+                if slot_duration_minutes < 15:
+                    continue
+                
+                # Ajustamos la duración si es necesario
+                if slot_duration_minutes < meeting_duration_minutes:
+                    meeting_duration_minutes = slot_duration_minutes
+                
+                meeting_end = slot_start + timedelta(minutes=meeting_duration_minutes)
+                meeting_end_str = meeting_end.isoformat()
+                if '.' in slot['end']:
+                    meeting_end_str += '.0000000'
+                
+                assigned.append({
+                    'taskName': task.get('title', 'Sin título'),
+                    'taskId': task.get('id', ''),
+                    'reservationTime': slot['start'],
+                    'reservationEnd': meeting_end_str,
+                    'calculatedDurationMinutes': meeting_duration_minutes,
+                    'adjustedDuration': True,  # Indicar que se ajustó la duración
+                    'dayOfWeek': slot_start.strftime('%A'),
+                    'date': str(slot_start.date()),
+                    'slotId': slot.get('id', '')
+                })
+                used_slots.add(slot_start)
+                break
 
     return assigned
 
