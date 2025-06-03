@@ -127,6 +127,8 @@ class Scheduler:
         busy = self._busy(busy_slots)
         assigned, periods = [], []
         for t in sorted(tasks, key=lambda t: self.an.score(t, self.now), reverse=True):
+            if t.get('percentComplete', 0) >= 100:
+                continue  # No asignar tareas ya completas
             a = self._assign(t, busy, periods)
             if a:
                 assigned.append(a)
