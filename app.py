@@ -228,23 +228,23 @@ class TaskAnalyzer:
         # Ajuste por prioridad (0=más urgente)
         priority = task.get('priority', 2)
         if priority == 0:  # Ultra urgente
-            base_duration += 30
+            base_duration += 60
         elif priority == 1:  # Muy importante
-            base_duration += 20
+            base_duration += 30
         
         # Ajuste por porcentaje completado
         percent_complete = task.get('percentComplete', 0)
         if percent_complete < 20:
-            base_duration += 15  # Tareas apenas iniciadas necesitan más tiempo
+            base_duration += 30  # Tareas apenas iniciadas necesitan más tiempo
         
         # Ajuste por cantidad de ítems en la lista de verificación
         checklist_items = task.get('checklistItemCount', 0)
         if checklist_items > 5:
-            base_duration += 15
+            base_duration += 30
         
         # Ajuste por descripción extensa
         if task.get('hasDescription', False):
-            base_duration += 10
+            base_duration += 30
         
         # Limitar a los rangos permitidos
         return min(max(base_duration, Config.MIN_MEETING_DURATION), Config.MAX_MEETING_DURATION)
