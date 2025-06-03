@@ -225,11 +225,11 @@ class TaskAnalyzer:
         """
         base_duration = Config.BASE_MEETING_DURATION  # 90 minutos base
         
-        # Ajuste por prioridad (0=más urgente)
+        # Ajuste por prioridad (1=más urgente)
         priority = task.get('priority', 2)
-        if priority == 0:  # Ultra urgente
+        if priority == 1:  # Ultra urgente
             base_duration += 60
-        elif priority == 1:  # Muy importante
+        elif priority == 3:  # Muy importante
             base_duration += 30
         
         # Ajuste por porcentaje completado
