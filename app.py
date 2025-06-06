@@ -1,6 +1,6 @@
 """
 🏗 API REST para Asignación Inteligente de Tareas
-==================================================.
+==================================================...
 API que gestiona la asignación de tareas en la agenda del usuario,
 distribuyéndolas de manera inteligente en horarios laborales.
 """
