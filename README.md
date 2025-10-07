@@ -1,15 +1,44 @@
-# EVITA LA PROCRASTINACIÓN CON POWER AUTOMATE
-## GESTOR DE TIEMPO INTELIGENTE
-## 9º Evento Anfitrionas - w4tt - Women for technical talks - 07/06/2025
+# ⏳ Evita la procrastinación con Power Automate  
+## 🧠 Gestor de tiempo inteligente  
+### 👩‍💻 9º Evento Anfitrionas — w4tt (Women for Technical Talks) — 07/06/2025
 
-### Una herramienta para obligarte a enfrentar tus tareas pendientes, reservando tiempo en tu agenda profesional.
+Una herramienta diseñada para ayudarte a **enfrentar tus tareas pendientes**, reservando tiempo real en tu **agenda profesional** de forma automatizada y estratégica.
 
-1. API Flask Python, configuración Railway
-2. Flujo automatizado Power Automate
+---
 
-Desde Microsoft Power Automate llamamos a la API publicada en un contenedor de Railway. 
-La API recoge las tareas pendientes de un proyecto Microsoft PLANNER y los huecos NO DISPONIBLES de la agenda de OUTLOOK.
-La API devuelve slots de OUTLOOK a reservar como ocupados en OUTLOOK, habiéndolos distribuidos según las reglas de negocio de la API.
+## 🧩 Componentes de la solución
 
-El flujo es quien llama a la API con datos y recoge la respuesta, y es el único que interactúa con Planner y Outlook.
-La API solo recibe/envía datos JSON sin credenciales ni datos sensibles.
+- 🐍 **API Flask en Python**
+- 🚂 **Contenedor desplegado en Railway**
+- 🔄 **Flujo automatizado en Power Automate**
+
+---
+
+## 🔗 Integración Planner + Outlook
+
+Desde **Microsoft Power Automate** se realiza una llamada a la **API publicada en Railway**.  
+La API:
+
+- 📋 Recoge las **tareas pendientes** de un proyecto en **Microsoft Planner**
+- 📅 Consulta los **huecos NO DISPONIBLES** en la agenda de **Outlook**
+- 🧠 Aplica reglas de negocio para devolver **slots óptimos** que se pueden reservar como ocupados
+
+---
+
+## ⚙️ Funcionamiento del flujo
+
+1. 🔁 El flujo de Power Automate **llama a la API** con los datos necesarios.
+2. 📥 Recoge la **respuesta JSON** con los slots recomendados.
+3. 📆 Reserva automáticamente esos **slots en Outlook** como ocupados.
+4. 🔐 La API **no gestiona credenciales** ni datos sensibles, solo intercambia JSON estructurado.
+
+---
+
+## 🎯 Objetivo
+
+- ✅ **Forzar la acción** sobre tareas pendientes
+- 📆 **Bloquear tiempo real** en la agenda profesional
+- 🔄 **Automatizar la gestión del tiempo**
+- 🧘‍♀️ **Reducir la procrastinación** con decisiones automatizadas
+
+---
