@@ -1,6 +1,7 @@
 # ⏳ Evita la procrastinación con Power Automate  
 ## 🧠 Gestor de tiempo inteligente  
 ### 👩‍💻 9º Evento Anfitrionas — w4tt (Women for Technical Talks) — 07/06/2025
+### 👩‍💻 2º Evento Christmas Power Data Platform — 12/12/2025
 
 Una herramienta diseñada para ayudarte a **enfrentar tus tareas pendientes**, reservando tiempo real en tu **agenda profesional** de forma automatizada y estratégica.
 
