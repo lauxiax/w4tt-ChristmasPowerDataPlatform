@@ -5,7 +5,13 @@
 
 Una herramienta diseñada para ayudarte a **enfrentar tus tareas pendientes**, reservando tiempo real en tu **agenda profesional** de forma automatizada y estratégica.
 
----
+Feliz★* 。 • ˚ ˚ ˛ ˚ ˛ •
+•。★Navidad★ 。* 。
+° 。 ° ˛˚˛ * _Π_____*。*˚
+˚ ˛ •˛•˚ */______/~＼。˚ ˚ ˛
+˚ ˛ •˛• ˚ ｜ 田田 ｜門｜ ˚
+
+-----
 
 ## 🧩 Componentes de la solución
 
